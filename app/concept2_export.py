@@ -446,6 +446,146 @@ except ImportError:
     HAS_TKINTER = False
 
 
+class WorkoutSelectionDialog:
+    """Dialog for selecting which workouts to export."""
+
+    def __init__(self, parent, workouts: list[Workout]):
+        self.result = None
+        self.workouts = workouts
+        self.selected_indices = set(range(len(workouts)))  # All selected by default
+
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Select Workouts to Export")
+        self.dialog.geometry("700x500")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # Center on parent
+        self.dialog.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 700) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 500) // 2
+        self.dialog.geometry(f"700x500+{x}+{y}")
+
+        self._build_ui()
+
+    def _build_ui(self):
+        # Header
+        header_frame = ttk.Frame(self.dialog)
+        header_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Label(header_frame, text="Select workouts to export:",
+                 font=("Arial", 12, "bold")).pack(side="left")
+
+        self.count_var = tk.StringVar()
+        self._update_count()
+        ttk.Label(header_frame, textvariable=self.count_var).pack(side="right")
+
+        # Buttons for select all / none
+        btn_frame = ttk.Frame(self.dialog)
+        btn_frame.pack(fill="x", padx=10)
+
+        ttk.Button(btn_frame, text="Select All", command=self._select_all).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Select None", command=self._select_none).pack(side="left", padx=2)
+
+        # Treeview with checkboxes
+        tree_frame = ttk.Frame(self.dialog)
+        tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(tree_frame)
+        scrollbar.pack(side="right", fill="y")
+
+        # Treeview
+        columns = ("select", "person", "date", "side", "avg_power", "peak_power")
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings",
+                                  yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.tree.yview)
+
+        # Column headings
+        self.tree.heading("select", text="Export")
+        self.tree.heading("person", text="Person")
+        self.tree.heading("date", text="Date")
+        self.tree.heading("side", text="Side")
+        self.tree.heading("avg_power", text="Avg Power")
+        self.tree.heading("peak_power", text="Peak Power")
+
+        # Column widths
+        self.tree.column("select", width=50, anchor="center")
+        self.tree.column("person", width=150)
+        self.tree.column("date", width=100)
+        self.tree.column("side", width=50, anchor="center")
+        self.tree.column("avg_power", width=80, anchor="right")
+        self.tree.column("peak_power", width=80, anchor="right")
+
+        self.tree.pack(fill="both", expand=True)
+
+        # Populate tree
+        for i, w in enumerate(self.workouts):
+            check = "✓" if i in self.selected_indices else ""
+            self.tree.insert("", "end", iid=str(i), values=(
+                check,
+                w.person.strip().title(),
+                w.date,
+                w.side or "-",
+                f"{w.avg_power:.1f} W" if w.avg_power else "-",
+                f"{w.peak_power:.1f} W" if w.peak_power else "-"
+            ))
+
+        # Bind click to toggle selection
+        self.tree.bind("<ButtonRelease-1>", self._on_click)
+
+        # Bottom buttons
+        bottom_frame = ttk.Frame(self.dialog)
+        bottom_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Button(bottom_frame, text="Cancel", command=self._cancel).pack(side="right", padx=5)
+        ttk.Button(bottom_frame, text="Export Selected", command=self._confirm).pack(side="right", padx=5)
+
+    def _on_click(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+
+        idx = int(item)
+        if idx in self.selected_indices:
+            self.selected_indices.remove(idx)
+            self.tree.set(item, "select", "")
+        else:
+            self.selected_indices.add(idx)
+            self.tree.set(item, "select", "✓")
+
+        self._update_count()
+
+    def _select_all(self):
+        self.selected_indices = set(range(len(self.workouts)))
+        for i in range(len(self.workouts)):
+            self.tree.set(str(i), "select", "✓")
+        self._update_count()
+
+    def _select_none(self):
+        self.selected_indices = set()
+        for i in range(len(self.workouts)):
+            self.tree.set(str(i), "select", "")
+        self._update_count()
+
+    def _update_count(self):
+        total = len(self.workouts)
+        selected = len(self.selected_indices)
+        self.count_var.set(f"{selected} of {total} selected")
+
+    def _confirm(self):
+        self.result = [self.workouts[i] for i in sorted(self.selected_indices)]
+        self.dialog.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.dialog.destroy()
+
+    def show(self) -> Optional[list[Workout]]:
+        self.dialog.wait_window()
+        return self.result
+
+
 class Concept2ExportApp:
     def __init__(self):
         self.root = tk.Tk()
@@ -462,6 +602,7 @@ class Concept2ExportApp:
         self._build_ui()
         self.client = None
         self.workouts = []
+        self.selected_workouts = []
 
     def _build_ui(self):
         # Title
@@ -501,7 +642,11 @@ class Concept2ExportApp:
                                     command=self._do_fetch, width=25, state="disabled")
         self.fetch_btn.pack(pady=5)
 
-        self.export_btn = ttk.Button(btn_frame, text="3. Export to Excel",
+        self.select_btn = ttk.Button(btn_frame, text="3. Select Workouts",
+                                     command=self._do_select, width=25, state="disabled")
+        self.select_btn.pack(pady=5)
+
+        self.export_btn = ttk.Button(btn_frame, text="4. Export to Excel",
                                      command=self._do_export, width=25, state="disabled")
         self.export_btn.pack(pady=5)
 
@@ -568,7 +713,7 @@ class Concept2ExportApp:
         people = set(w.person.strip().title() for w in self.workouts)
 
         self._update_status(f"Found {count} workouts from {len(people)} people")
-        self.export_btn.config(state="normal")
+        self.select_btn.config(state="normal")
         self.fetch_btn.config(text="2. Fetch Workouts ✓", state="disabled")
 
     def _fetch_error(self, error: str):
@@ -576,6 +721,24 @@ class Concept2ExportApp:
         self._update_status(f"Error fetching workouts: {error}")
         self.fetch_btn.config(state="normal")
         messagebox.showerror("Fetch Error", error)
+
+    def _do_select(self):
+        dialog = WorkoutSelectionDialog(self.root, self.workouts)
+        result = dialog.show()
+
+        if result is None:
+            # User cancelled
+            return
+
+        if not result:
+            messagebox.showwarning("No Selection", "Please select at least one workout to export.")
+            return
+
+        self.selected_workouts = result
+        people = set(w.person.strip().title() for w in result)
+        self._update_status(f"Selected {len(result)} workouts from {len(people)} people")
+        self.export_btn.config(state="normal")
+        self.select_btn.config(text="3. Select Workouts ✓")
 
     def _do_export(self):
         default_path = get_output_dir() / "concept2_workouts.xlsx"
@@ -596,7 +759,7 @@ class Concept2ExportApp:
 
         def export_thread():
             try:
-                num_people = export_to_excel(self.workouts, Path(filepath))
+                num_people = export_to_excel(self.selected_workouts, Path(filepath))
                 self.root.after(0, lambda: self._export_success(filepath, num_people))
             except Exception as e:
                 self.root.after(0, lambda: self._export_error(str(e)))
@@ -606,11 +769,11 @@ class Concept2ExportApp:
     def _export_success(self, filepath: str, num_people: int):
         self.progress.stop()
         self._update_status(f"Exported to {filepath}")
-        self.export_btn.config(text="3. Export to Excel ✓")
+        self.export_btn.config(text="4. Export to Excel ✓")
 
         result = messagebox.askyesno(
             "Export Complete",
-            f"Successfully exported {len(self.workouts)} workouts\n"
+            f"Successfully exported {len(self.selected_workouts)} workouts\n"
             f"for {num_people} people to:\n\n{filepath}\n\n"
             "Would you like to open the file?"
         )
