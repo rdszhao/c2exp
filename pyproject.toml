@@ -1,0 +1,13 @@
+[project]
+name = "c2-to-excel"
+version = "0.1.0"
+description = "Sync Concept2 Logbook workouts to Excel"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.1",
+    "openpyxl>=3.1.0",
+]
+
+[project.scripts]
+c2-sync = "scripts.main:main"
