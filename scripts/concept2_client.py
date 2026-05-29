@@ -170,9 +170,40 @@ class Concept2Client:
             return False
         try:
             resp = self._api_get("/api/users/me")
-            return resp is not None
+            if resp is not None:
+                return True
+            # Token might be expired, try refresh
+            if self.refresh_token:
+                return self._refresh_access_token()
+            return False
         except:
             return False
+
+    def _refresh_access_token(self) -> bool:
+        """Use refresh token to get a new access token."""
+        if not self.refresh_token:
+            return False
+
+        print("Refreshing access token...")
+        try:
+            response = requests.post(TOKEN_URL, data={
+                "grant_type": "refresh_token",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "refresh_token": self.refresh_token,
+            })
+
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data["access_token"]
+                self.refresh_token = data.get("refresh_token", self.refresh_token)
+                self._save_token()
+                print("Token refreshed successfully")
+                return True
+        except:
+            pass
+
+        return False
 
     def _fetch_user_id(self) -> bool:
         data = self._api_get("/api/users/me")
